@@ -1,0 +1,28 @@
+bnp-sidecar
+===========
+
+An unofficial, read-only command-line client for BNP Paribas account
+information. It offers two independent backends:
+
+- the Enable Banking PSD2 account-information API;
+- a direct session against the BNP Paribas web application.
+
+This project is not affiliated with, endorsed by, or supported by BNP Paribas,
+Enable Banking Oy, or any of their affiliates. Use it with your own account, at
+your own risk, and in accordance with the terms of service of your bank and of
+Enable Banking.
+
+"BNP Paribas" and "Enable Banking" are trademarks of their respective owners.
+
+The project does not implement payment initiation, transfers, orders or any
+other write operation. It only reads account details, balances and
+transactions.
+
+- In Enable Banking mode, the account holder authorises access explicitly
+  through the bank's own strong customer authentication flow in a browser.
+- In direct mode, the account holder types their customer ID and 6-digit code
+  in the terminal for each run, completes the bank's 2FA, and the sidecar sends
+  only the read-only requests that the BNP web application performs. The code
+  is never persisted, and session cookies stay in memory.
+
+Enable Banking API documentation: https://enablebanking.com/docs/api/reference/

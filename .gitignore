@@ -1,0 +1,37 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+.eggs/
+
+# Packaging
+*.whl
+*.tar.gz
+
+# Sidecar runtime data (Enable Banking application key, PSD2 session, pending link)
+.runtime/
+data/
+session.json
+pending-link.json
+config.json
+private-key.pem
+*.pem
+*.key
+*.crt
+
+# Local secrets and scratch files
+.env
+.env.*
+*.local
+*.log
+*.otp
+.DS_Store
