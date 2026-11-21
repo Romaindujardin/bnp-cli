@@ -89,8 +89,10 @@ Manual searches:
 - logging of request URLs, headers and bodies;
 - redirect handling and host allowlists.
 
-The repository has no Git history yet (`.git` is absent), so no history scan was
-possible. The scan covers the working tree that would be committed.
+The repository had no Git history at the start of the audit, so the initial
+scan covered the working tree that would be committed. After `git init`, the
+staged tree and the published history were scanned again; the result is
+recorded in section 8.
 
 ## 3. Findings
 
@@ -264,9 +266,19 @@ redaction. It is not a usable key and is not stored as a committed PEM file.
 `session.json`, `pending-link.json`, `mfa-structure.json`, `data/`, exports and
 local environment files.
 
-The repository is not yet initialized as a Git repository. Before publishing,
-re-run a secret scan on the actual staged tree and on the Git history, and
-verify that no runtime file was added by accident.
+The repository was initialized and published as
+`Romaindujardin/bnp-sidecar` with commit `66a10a2`, tag `v0.2.0` and a GitHub
+release. After publication:
+
+- every blob reachable from `main` and the tag was scanned for private keys,
+  tokens, real IBANs and local home paths;
+- GitHub secret scanning reports **0 alerts**;
+- the public CI run is green on Python 3.11, 3.12 and 3.13 (lint, tests and
+  package build);
+- no runtime file, export or `.env` is tracked by Git.
+
+The Enable Banking live smoke test and the key-rotation check remain open as
+operational follow-ups.
 
 ## 9. Residual risks
 
@@ -311,11 +323,11 @@ verify that no runtime file was added by accident.
 - [x] Direct live run performed: 6 accounts, 522 transactions, 0 per-account
       errors, 0 duplicate identifiers.
 - [x] No real credentials or account data in the working tree.
+- [x] Secret scan run on the staged Git tree and on the published history.
+- [x] Explicit approval obtained, repository published and CI green.
 - [ ] Run `scripts/real_smoke.py` with a real Enable Banking application and a
       real BNP Paribas account, then review the output for personal data before
       sharing.
-- [ ] Re-run a secret scan on the staged Git tree and history after `git init`.
-- [ ] Obtain explicit approval before publishing the repository.
 - [ ] Rotate the Enable Banking application key if it was exposed during
       testing.
 
