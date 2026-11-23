@@ -352,9 +352,57 @@ Direct options:
 | `--until YYYY-MM-DD` | Export end date (default: today). |
 | `--account SELECTOR` | Repeatable account filter: key, name, product or IBAN. |
 | `--no-transactions` | Export accounts and balances only. |
+| `--customer-id ID` | BNP customer number (7–10 digits); also `BNP_CUSTOMER_ID`. |
+| `--password-stdin` | Read the six-digit secret from stdin. Never stored. |
+| `--mfa-dir PATH` | Private directory (mode `0700`) used to exchange MFA requests/responses. |
+| `--mfa-timeout SECONDS` | Maximum wait for an MFA response (default: `180`). |
 
 Each direct command performs its own login. A BNP web session expires after
 roughly 12–24 minutes of inactivity; there is no cookie persistence to reuse.
+
+#### Non-interactive MFA broker
+
+The `--mfa-dir` option is intended for a local dashboard or any automation. It
+keeps the password out of argv and environment variables: the CLI reads it
+once from stdin, uses it for the login, and never writes it to disk.
+
+When BNP requests strong authentication, the CLI writes `mfa-request.json`
+(mode `0600`) in the private directory and polls for `mfa-response.json`:
+
+```json
+{
+  "schema": "bnp-sidecar/mfa-request/v1",
+  "id": "…",
+  "kind": "sms",
+  "page": { "host": "mabanque.bnpparibas", "path": "/…", "queryKeys": [] },
+  "codeRequired": true,
+  "actions": [{ "index": 0, "label": "Valider (formulaire 1)", "kind": "form" }]
+}
+```
+
+The request contains only the challenge type, the masked page location and the
+allowed action labels. It never contains form field values, CSRF tokens or
+cookies. Write the response atomically with the matching `id`:
+
+```json
+{ "schema": "bnp-sidecar/mfa-response/v1", "id": "…", "code": "123456" }
+```
+
+For an approval in the BNP mobile app, use `{ "id": "…", "action": 0 }`
+(action `0` is “I approved in the BNP app”). For other challenges, send the
+index of the desired action. The CLI deletes the request and response files
+after use. On timeout it exits with `MFA_REQUIRED` without persisting anything.
+
+Example:
+
+```bash
+install -d -m 700 /run/user/$(id -u)/bnp-mfa
+printf '%s\n' "$BNP_SECRET" | bnp-direct export \
+  --customer-id "$BNP_CUSTOMER_ID" \
+  --password-stdin \
+  --mfa-dir /run/user/$(id -u)/bnp-mfa \
+  --output "$HOME/Documents/bnp-export.json"
+```
 
 ### Selecting accounts (Enable Banking)
 

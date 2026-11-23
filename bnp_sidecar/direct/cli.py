@@ -13,7 +13,10 @@ import getpass
 import json
 import os
 import re
+import stat
 import sys
+import time
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -21,9 +24,9 @@ from urllib.parse import urlparse
 
 from ..errors import SidecarError, UsageError
 from ..paths import SidecarPaths
-from ..private_files import write_private_json
+from ..private_files import read_private_json, write_private_json
 from ..redact import Redactor
-from .client import BnpDirectClient, MfaDecision
+from .client import BnpDirectClient, MfaDecision, MfaHandler
 from .login import MfaChallenge
 
 _CUSTOMER_ID_RE = re.compile(r"[0-9]{7,10}")
@@ -36,6 +39,23 @@ class _ArgumentParser(argparse.ArgumentParser):
 
     def error(self, message: str) -> None:  # type: ignore[override]
         raise UsageError(message)
+
+
+def _add_mfa_options(parser: argparse.ArgumentParser) -> None:
+    """Ajoute l'échange MFA par fichiers privés (intégration dashboard)."""
+    parser.add_argument(
+        "--mfa-dir",
+        help=(
+            "Répertoire privé 0700 où le CLI dépose la demande de validation "
+            "forte et attend une réponse JSON (intégration non interactive)."
+        ),
+    )
+    parser.add_argument(
+        "--mfa-timeout",
+        type=float,
+        default=180.0,
+        help="Délai maximal d'attente d'une réponse MFA, en secondes (défaut: 180).",
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -76,6 +96,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ajoute les objets BNP bruts (données sensibles).",
     )
+    _add_mfa_options(accounts)
 
     export = subparsers.add_parser(
         "export",
@@ -120,6 +141,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ajoute les objets BNP bruts (données sensibles).",
     )
+    _add_mfa_options(export)
     return parser
 
 
@@ -283,6 +305,122 @@ def _mfa_handler(challenge: MfaChallenge) -> MfaDecision | None:
     return _prompt_mfa_choice(actions)
 
 
+def _private_mfa_dir(path: str | Path) -> Path:
+    """Valide un répertoire d'échange MFA privé (0700, sans lien symbolique)."""
+    directory = Path(path).expanduser()
+    if directory.is_symlink():
+        raise UsageError(
+            f"Le répertoire MFA {directory} est un lien symbolique; refus d'utilisation."
+        )
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    info = directory.stat()
+    if not stat.S_ISDIR(info.st_mode):
+        raise UsageError(f"Le chemin MFA {directory} n'est pas un répertoire.")
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        raise UsageError(
+            f"Le répertoire MFA {directory} est accessible au groupe ou aux autres "
+            f"(mode {stat.S_IMODE(info.st_mode):o}). Corrigez avec: chmod 700 {directory}"
+        )
+    return directory
+
+
+def _broker_mfa_decision(
+    challenge: MfaChallenge,
+    mfa_dir: Path,
+    timeout: float,
+) -> MfaDecision | None:
+    """Échange la validation forte via des fichiers privés (dashboard).
+
+    Le CLI écrit ``mfa-request.json`` (sans valeur de champ ni jeton) puis
+    attend ``mfa-response.json``. Le dashboard lit la demande, la présente à
+    l'utilisateur et écrit la réponse. Aucun secret ne passe par argv ou les
+    journaux.
+    """
+    if timeout <= 0:
+        raise UsageError("Le délai de validation BNP doit être positif.")
+    directory = _private_mfa_dir(mfa_dir)
+    actions = _mfa_actions(challenge)
+    if challenge.kind == "approval":
+        actions.insert(
+            0,
+            ("J'ai validé dans l'application BNP", {"type": "continue"}),
+        )
+    code_required = challenge.kind == "sms" and bool(challenge.code_fields)
+    if code_required:
+        # La page SMS attend uniquement le code : ne pas proposer d'action
+        # alternative qui soumettrait le formulaire sans code.
+        actions = []
+    if not code_required and not actions:
+        raise UsageError("Aucune action de validation BNP reconnue.")
+
+    request_id = uuid.uuid4().hex
+    request_path = directory / "mfa-request.json"
+    response_path = directory / "mfa-response.json"
+    write_private_json(
+        request_path,
+        {
+            "schema": "bnp-sidecar/mfa-request/v1",
+            "id": request_id,
+            "kind": challenge.kind,
+            "page": challenge.structure.get("page", {}),
+            "codeRequired": code_required,
+            "actions": [
+                {"index": index, "label": label, "kind": decision["type"]}
+                for index, (label, decision) in enumerate(actions)
+            ],
+        },
+    )
+
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
+            if not response_path.exists():
+                time.sleep(0.2)
+                continue
+            response = read_private_json(
+                response_path,
+                error_cls=UsageError,
+                label="La réponse de validation BNP",
+            )
+            response_path.unlink(missing_ok=True)
+            if response.get("id") != request_id:
+                # Réponse périmée (nouvelle demande entre-temps) : on ignore.
+                continue
+            if response.get("cancel"):
+                return None
+            code = response.get("code")
+            if code is not None:
+                candidate = str(code).strip()
+                if not _CODE_RE.fullmatch(candidate):
+                    raise UsageError(
+                        "Le code de validation BNP doit contenir 4 à 10 chiffres."
+                    )
+                return {"type": "code", "code": candidate}
+            action = response.get("action")
+            if isinstance(action, int) and not isinstance(action, bool):
+                if 0 <= action < len(actions):
+                    return actions[action][1]
+                raise UsageError("Action de validation BNP introuvable.")
+            if response.get("continue") and challenge.kind == "approval":
+                return {"type": "continue"}
+            raise UsageError("Réponse de validation BNP invalide.")
+        return None
+    finally:
+        request_path.unlink(missing_ok=True)
+
+
+def _mfa_handler_for_args(
+    args: argparse.Namespace,
+) -> MfaHandler:
+    """Retourne le gestionnaire terminal ou le broker de fichiers privés."""
+    mfa_dir = getattr(args, "mfa_dir", None)
+    if not mfa_dir:
+        return _mfa_handler
+    directory = _private_mfa_dir(mfa_dir)
+    timeout = float(getattr(args, "mfa_timeout", 180.0))
+    return lambda challenge: _broker_mfa_decision(challenge, directory, timeout)
+
+
 def _emit(payload: dict[str, Any], output: str | None) -> None:
     if output:
         path = Path(output).expanduser()
@@ -334,7 +472,10 @@ def _run_probe() -> int:
 
 
 def _run_accounts(args: argparse.Namespace, redactor: Redactor) -> int:
-    client = BnpDirectClient(include_raw=args.raw, mfa_handler=_mfa_handler)
+    client = BnpDirectClient(
+        include_raw=args.raw,
+        mfa_handler=_mfa_handler_for_args(args),
+    )
     try:
         print("Ouverture de la page de connexion BNP…", file=sys.stderr)
         customer_id, password = _prompt_credentials(args)
@@ -353,7 +494,10 @@ def _run_accounts(args: argparse.Namespace, redactor: Redactor) -> int:
 
 
 def _run_export(args: argparse.Namespace, redactor: Redactor) -> int:
-    client = BnpDirectClient(include_raw=args.raw, mfa_handler=_mfa_handler)
+    client = BnpDirectClient(
+        include_raw=args.raw,
+        mfa_handler=_mfa_handler_for_args(args),
+    )
     try:
         print("Ouverture de la page de connexion BNP…", file=sys.stderr)
         customer_id, password = _prompt_credentials(args)

@@ -128,3 +128,144 @@ def test_prompt_credentials_validation(monkeypatch) -> None:
     with pytest.raises(UsageError, match="code secret BNP"):
         direct_cli._prompt_credentials()
 
+
+
+# ---------------------------------------------------------------------------
+# Broker MFA par fichiers privés (intégration dashboard)
+# ---------------------------------------------------------------------------
+
+MFA_APPROVAL_HTML = """
+<html><body>
+<p>Merci de valider la connexion dans l'application BNP.</p>
+</body></html>
+"""
+
+
+def _wait_for_request(tmp_path, timeout=5.0):
+    import json
+    import time
+
+    request_path = tmp_path / "mfa-request.json"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if request_path.exists():
+            return json.loads(request_path.read_text(encoding="utf-8"))
+        time.sleep(0.02)
+    raise AssertionError("mfa-request.json n'a pas été écrit")
+
+
+def test_broker_mfa_writes_private_request_and_reads_sms_code(tmp_path) -> None:
+    import json
+    import os
+    import stat
+    import threading
+
+    from bnp_sidecar.private_files import write_private_json
+
+    os.chmod(tmp_path, 0o700)
+    challenge = parse_mfa_page(MFA_SMS_HTML, "https://mabanque.bnpparibas/valider")
+
+    def responder() -> None:
+        request = _wait_for_request(tmp_path)
+        assert request["schema"] == "bnp-sidecar/mfa-request/v1"
+        assert request["kind"] == "sms"
+        assert request["codeRequired"] is True
+        assert request["actions"] == []
+        content = (tmp_path / "mfa-request.json").read_text(encoding="utf-8")
+        assert "jeton" not in content
+        assert "csrf" not in content  # aucun détail de formulaire/token
+        mode = stat.S_IMODE((tmp_path / "mfa-request.json").stat().st_mode)
+        assert mode == 0o600
+        write_private_json(
+            tmp_path / "mfa-response.json",
+            {
+                "schema": "bnp-sidecar/mfa-response/v1",
+                "id": request["id"],
+                "code": "654321",
+            },
+        )
+
+    thread = threading.Thread(target=responder)
+    thread.start()
+    decision = direct_cli._broker_mfa_decision(challenge, tmp_path, 5.0)
+    thread.join(timeout=5)
+    assert decision == {"type": "code", "code": "654321"}
+    assert not (tmp_path / "mfa-request.json").exists()
+    assert not (tmp_path / "mfa-response.json").exists()
+
+
+def test_broker_mfa_maps_action_index(tmp_path) -> None:
+    import os
+    import threading
+
+    from bnp_sidecar.private_files import write_private_json
+
+    os.chmod(tmp_path, 0o700)
+    challenge = parse_mfa_page(
+        MFA_UNKNOWN_HTML, "https://mabanque.bnpparibas/choix"
+    )
+
+    def responder() -> None:
+        request = _wait_for_request(tmp_path)
+        assert request["codeRequired"] is False
+        assert [action["kind"] for action in request["actions"]] == ["form"]
+        assert "Recevoir un code par SMS" in request["actions"][0]["label"]
+        write_private_json(
+            tmp_path / "mfa-response.json",
+            {"id": request["id"], "action": 0},
+        )
+
+    thread = threading.Thread(target=responder)
+    thread.start()
+    decision = direct_cli._broker_mfa_decision(challenge, tmp_path, 5.0)
+    thread.join(timeout=5)
+    assert decision == {"type": "form", "form": 0, "button": 0}
+
+
+def test_broker_mfa_offers_continue_for_approval(tmp_path) -> None:
+    import os
+    import threading
+
+    from bnp_sidecar.private_files import write_private_json
+
+    os.chmod(tmp_path, 0o700)
+    challenge = parse_mfa_page(
+        MFA_APPROVAL_HTML, "https://mabanque.bnpparibas/approbation"
+    )
+
+    def responder() -> None:
+        request = _wait_for_request(tmp_path)
+        assert request["kind"] == "approval"
+        assert request["actions"][0]["kind"] == "continue"
+        assert "application BNP" in request["actions"][0]["label"]
+        write_private_json(
+            tmp_path / "mfa-response.json",
+            {"id": request["id"], "action": 0},
+        )
+
+    thread = threading.Thread(target=responder)
+    thread.start()
+    decision = direct_cli._broker_mfa_decision(challenge, tmp_path, 5.0)
+    thread.join(timeout=5)
+    assert decision == {"type": "continue"}
+
+
+def test_broker_mfa_times_out_and_removes_request(tmp_path) -> None:
+    import os
+
+    os.chmod(tmp_path, 0o700)
+    challenge = parse_mfa_page(MFA_SMS_HTML, "https://mabanque.bnpparibas/valider")
+    assert direct_cli._broker_mfa_decision(challenge, tmp_path, 0.3) is None
+    assert not (tmp_path / "mfa-request.json").exists()
+
+
+def test_broker_mfa_refuses_shared_directory(tmp_path) -> None:
+    import os
+
+    import pytest
+    from bnp_sidecar.errors import UsageError
+
+    os.chmod(tmp_path, 0o755)
+    challenge = parse_mfa_page(MFA_SMS_HTML, "https://mabanque.bnpparibas/valider")
+    with pytest.raises(UsageError, match="accessible au groupe"):
+        direct_cli._broker_mfa_decision(challenge, tmp_path, 1.0)
