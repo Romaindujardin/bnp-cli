@@ -1,6 +1,6 @@
 # BNP Paribas sidecar
 
-[![CI](https://github.com/Romaindujardin/bnp-sidecar/actions/workflows/ci.yml/badge.svg)](https://github.com/Romaindujardin/bnp-sidecar/actions/workflows/ci.yml)
+[![CI](https://github.com/Romaindujardin/bnp-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Romaindujardin/bnp-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
@@ -181,8 +181,8 @@ the private key stays on your machine.
 ### From source
 
 ```bash
-git clone https://github.com/Romaindujardin/bnp-sidecar.git
-cd bnp-sidecar
+git clone https://github.com/Romaindujardin/bnp-cli.git
+cd bnp-cli
 python3.11 -m venv .venv
 .venv/bin/pip install --upgrade pip
 
@@ -200,10 +200,10 @@ The commands are then available as `.venv/bin/bnp-sidecar`,
 
 ```bash
 # Enable Banking backend
-pipx install "git+https://github.com/Romaindujardin/bnp-sidecar.git@v0.2.0"
+pipx install "git+https://github.com/Romaindujardin/bnp-cli.git"
 
 # Add the direct backend
-pipx inject bnp-sidecar curl-cffi
+pipx inject bnp-cli curl-cffi
 ```
 
 The project is not published on PyPI.

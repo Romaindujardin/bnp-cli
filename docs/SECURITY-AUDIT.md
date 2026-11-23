@@ -268,7 +268,7 @@ local environment files.
 
 The repository was initialized and published as
 `Romaindujardin/bnp-sidecar` with commit `66a10a2`, tag `v0.2.0` and a GitHub
-release. After publication:
+release, then renamed to `Romaindujardin/bnp-cli`. After publication:
 
 - every blob reachable from `main` and the tag was scanned for private keys,
   tokens, real IBANs and local home paths;

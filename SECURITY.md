@@ -17,7 +17,7 @@ Please **do not open a public issue** for a security problem.
 
 Use GitHub's private vulnerability reporting:
 
-<https://github.com/Romaindujardin/bnp-sidecar/security/advisories/new>
+<https://github.com/Romaindujardin/bnp-cli/security/advisories/new>
 
 Include, when possible:
 

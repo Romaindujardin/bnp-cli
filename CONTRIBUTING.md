@@ -21,8 +21,8 @@ Enable Banking credentials; security and predictability come first.
 ## Development setup
 
 ```bash
-git clone https://github.com/Romaindujardin/bnp-sidecar.git
-cd bnp-sidecar
+git clone https://github.com/Romaindujardin/bnp-cli.git
+cd bnp-cli
 python3.11 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -e ".[dev,direct]"
