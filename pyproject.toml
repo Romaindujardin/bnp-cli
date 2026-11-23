@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bnp-sidecar"
+name = "bnp-cli"
 version = "0.2.0"
 description = "Unofficial read-only BNP Paribas CLI: Enable Banking PSD2 or direct web session, accounts and transactions as JSON."
 readme = "README.md"
@@ -40,16 +40,16 @@ dev = [
 ]
 
 [project.scripts]
-bnp-sidecar = "bnp_sidecar.cli:main"
 bnp-cli = "bnp_sidecar.cli:main"
+bnp-sidecar = "bnp_sidecar.cli:main"
 bnp-direct = "bnp_sidecar.direct.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Romaindujardin/bnp-sidecar"
-Repository = "https://github.com/Romaindujardin/bnp-sidecar"
-Issues = "https://github.com/Romaindujardin/bnp-sidecar/issues"
-Changelog = "https://github.com/Romaindujardin/bnp-sidecar/blob/main/CHANGELOG.md"
-Security = "https://github.com/Romaindujardin/bnp-sidecar/security/policy"
+Homepage = "https://github.com/Romaindujardin/bnp-cli"
+Repository = "https://github.com/Romaindujardin/bnp-cli"
+Issues = "https://github.com/Romaindujardin/bnp-cli/issues"
+Changelog = "https://github.com/Romaindujardin/bnp-cli/blob/main/CHANGELOG.md"
+Security = "https://github.com/Romaindujardin/bnp-cli/security/policy"
 
 [tool.setuptools]
 include-package-data = true

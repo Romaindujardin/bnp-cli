@@ -94,3 +94,37 @@ def test_print_error_redacts_registered_secrets(capsys) -> None:
     assert "1234567" not in output
     assert "123456" not in output
     assert "[REDACTED]" in output
+
+
+def test_prompt_credentials_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("BNP_CUSTOMER_ID", "12345678")
+    monkeypatch.setenv("BNP_PASSWORD", "654321")
+    customer_id, password = direct_cli._prompt_credentials()
+    assert customer_id == "12345678"
+    assert password == "654321"
+
+
+def test_prompt_credentials_from_args_and_stdin(monkeypatch) -> None:
+    import argparse
+    import io
+
+    args = argparse.Namespace(customer_id="98765432", password_stdin=True)
+    monkeypatch.setattr("sys.stdin", io.StringIO("112233\n"))
+    customer_id, password = direct_cli._prompt_credentials(args)
+    assert customer_id == "98765432"
+    assert password == "112233"
+
+
+def test_prompt_credentials_validation(monkeypatch) -> None:
+    import pytest
+    from bnp_sidecar.errors import UsageError
+
+    monkeypatch.setenv("BNP_CUSTOMER_ID", "bad")
+    with pytest.raises(UsageError, match="numéro client BNP"):
+        direct_cli._prompt_credentials()
+
+    monkeypatch.setenv("BNP_CUSTOMER_ID", "12345678")
+    monkeypatch.setenv("BNP_PASSWORD", "bad")
+    with pytest.raises(UsageError, match="code secret BNP"):
+        direct_cli._prompt_credentials()
+

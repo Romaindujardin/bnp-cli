@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import getpass
 import json
+import os
 import re
 import sys
 from collections.abc import Sequence
@@ -61,6 +62,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Écrit le JSON dans un fichier privé 0600 au lieu de stdout.",
     )
     accounts.add_argument(
+        "--customer-id",
+        dest="customer_id",
+        help="Numéro client BNP (7 à 10 chiffres). Peut aussi être passé via BNP_CUSTOMER_ID.",
+    )
+    accounts.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="Lit le code secret sur stdin (ou via la variable BNP_PASSWORD).",
+    )
+    accounts.add_argument(
         "--raw",
         action="store_true",
         help="Ajoute les objets BNP bruts (données sensibles).",
@@ -73,6 +84,16 @@ def _build_parser() -> argparse.ArgumentParser:
     export.add_argument(
         "--output",
         help="Écrit le JSON dans un fichier privé 0600 au lieu de stdout.",
+    )
+    export.add_argument(
+        "--customer-id",
+        dest="customer_id",
+        help="Numéro client BNP (7 à 10 chiffres). Peut aussi être passé via BNP_CUSTOMER_ID.",
+    )
+    export.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="Lit le code secret sur stdin (ou via la variable BNP_PASSWORD).",
     )
     export.add_argument(
         "--since",
@@ -102,17 +123,40 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _prompt_credentials() -> tuple[str, str]:
-    try:
-        customer_id = input("Numéro client BNP (7 à 10 chiffres) : ").strip()
-    except EOFError as exc:
-        raise UsageError("Numéro client BNP manquant.") from exc
+def _prompt_credentials(args: argparse.Namespace | None = None) -> tuple[str, str]:
+    customer_id = (
+        getattr(args, "customer_id", None)
+        or os.environ.get("BNP_CUSTOMER_ID")
+    )
+    if not customer_id:
+        try:
+            customer_id = input("Numéro client BNP (7 à 10 chiffres) : ").strip()
+        except EOFError as exc:
+            raise UsageError("Numéro client BNP manquant.") from exc
+    else:
+        customer_id = customer_id.strip()
+
     if not _CUSTOMER_ID_RE.fullmatch(customer_id):
         raise UsageError("Le numéro client BNP doit contenir 7 à 10 chiffres.")
-    try:
-        password = getpass.getpass("Code secret BNP (6 chiffres) : ")
-    except EOFError as exc:
-        raise UsageError("Code secret BNP manquant.") from exc
+
+    password: str | None = None
+    if getattr(args, "password_stdin", False):
+        try:
+            line = sys.stdin.readline()
+            if line:
+                password = line.rstrip("\r\n")
+        except Exception as exc:
+            raise UsageError("Code secret BNP manquant sur stdin.") from exc
+    if not password:
+        password = os.environ.get("BNP_PASSWORD")
+    if not password:
+        try:
+            password = getpass.getpass("Code secret BNP (6 chiffres) : ")
+        except EOFError as exc:
+            raise UsageError("Code secret BNP manquant.") from exc
+    else:
+        password = password.strip()
+
     if not _PASSWORD_RE.fullmatch(password):
         raise UsageError("Le code secret BNP doit contenir exactement 6 chiffres.")
     return customer_id, password
@@ -293,7 +337,7 @@ def _run_accounts(args: argparse.Namespace, redactor: Redactor) -> int:
     client = BnpDirectClient(include_raw=args.raw, mfa_handler=_mfa_handler)
     try:
         print("Ouverture de la page de connexion BNP…", file=sys.stderr)
-        customer_id, password = _prompt_credentials()
+        customer_id, password = _prompt_credentials(args)
         redactor.add_many((customer_id, password))
         print("Connexion à BNP…", file=sys.stderr)
         client.login(customer_id, password)
@@ -312,7 +356,7 @@ def _run_export(args: argparse.Namespace, redactor: Redactor) -> int:
     client = BnpDirectClient(include_raw=args.raw, mfa_handler=_mfa_handler)
     try:
         print("Ouverture de la page de connexion BNP…", file=sys.stderr)
-        customer_id, password = _prompt_credentials()
+        customer_id, password = _prompt_credentials(args)
         redactor.add_many((customer_id, password))
         print("Connexion à BNP…", file=sys.stderr)
         client.login(customer_id, password)
